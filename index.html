@@ -265,58 +265,85 @@ const body = new THREE.Group();
 player.add(body);
 scene.add(player);
 
+// Stylized 3D animation character, built from detailed meshes.
+// Local +Z is the character's front. All parts follow the player rig.
+const smooth = (c, metal=0, rough=0.65) => mat(c,{metalness:metal,roughness:rough});
+const M = {
+  copper:smooth(0xb46a2a,.72,.28), gold:smooth(0xffcb52,.65,.26),
+  stitch:smooth(0xcaa36a), patch:smooth(0x94744d), iris:smooth(0x6b381d),
+  blush:smooth(0xf4a07e), mouth:smooth(0x76382f), hairLight:smooth(0xff9831),
+  boot:smooth(0x49271a), sole:smooth(0x281912), buckle:smooth(0xe6b55e,.8,.22)
+};
+function orb(parent, material, x,y,z, sx,sy,sz) {
+  const m=add(parent,new THREE.SphereGeometry(1,16,12),material,x,y,z);
+  m.scale.set(sx,sy,sz);return m;
+}
+function bar(parent,material,x,y,z,sx,sy,sz) {
+  return add(parent,new THREE.BoxGeometry(sx,sy,sz),material,x,y,z);
+}
 function mkLeg(sx) {
-  const piv = new THREE.Group();
-  piv.position.set(sx, 0.5, 0);
-  body.add(piv);
-  add(piv, new THREE.BoxGeometry(0.28, 0.4, 0.3), MAT.pants, 0, -0.2, 0);
-  add(piv, new THREE.BoxGeometry(0.3, 0.22, 0.4), MAT.leather, 0, -0.5, 0.04);
+  const piv=new THREE.Group();piv.position.set(sx,0.68,0);body.add(piv);
+  orb(piv,MAT.pants,0,-0.24,0,.23,.34,.25);
+  orb(piv,M.patch,0,-0.37,.17,.16,.12,.04);
+  bar(piv,MAT.leather,0,-.5,0,.32,.16,.34);
+  orb(piv,M.boot,0,-.59,.09,.23,.23,.32);
+  orb(piv,M.sole,0,-.76,.13,.25,.08,.34);
+  for(let i=0;i<3;i++)bar(piv,M.buckle,0,-.48-i*.07,.36,.16,.025,.025);
   return piv;
 }
-const legL = mkLeg(-0.17), legR = mkLeg(0.17);
-
-add(body, new THREE.BoxGeometry(0.62, 0.62, 0.36), MAT.shirt, 0, 0.82, 0);
-add(body, new THREE.BoxGeometry(0.66, 0.1, 0.4), MAT.leather, 0, 0.52, 0);
-add(body, new THREE.BoxGeometry(0.12, 0.1, 0.02), MAT.brass, 0, 0.52, 0.21);
-const beltGear = makeGear(0.1, 8, MAT.brass);
-beltGear.position.set(0, 0.52, 0.22);
-body.add(beltGear);
-const cape = add(body, new THREE.BoxGeometry(0.62, 0.85, 0.05), MAT.cape, 0, 0.85, -0.22);
-add(body, new THREE.BoxGeometry(0.44, 0.14, 0.42), MAT.scarf, 0, 1.16, 0);
-const scarfTail = add(body, new THREE.BoxGeometry(0.12, 0.5, 0.06), MAT.scarf, -0.2, 0.9, -0.28);
-
+const legL=mkLeg(-.24),legR=mkLeg(.24);
+orb(body,MAT.shirt,0,1.05,0,.42,.48,.29);
+orb(body,MAT.leather,0,.74,0,.44,.11,.32);
+bar(body,M.buckle,0,.75,.32,.17,.13,.04);
+const beltGear=makeGear(.14,9,MAT.brass);beltGear.position.set(-.22,.77,.32);body.add(beltGear);
+const satchel=orb(body,MAT.leather,.43,.78,.07,.21,.26,.16);
+bar(body,M.buckle,.46,.81,.23,.12,.12,.035);
+const cape=new THREE.Group();cape.position.set(0,1.39,-.29);body.add(cape);
+const capeMesh=new THREE.Mesh(new THREE.ConeGeometry(.75,1.35,7,1,true,Math.PI/7,Math.PI*1.75),MAT.cape);
+capeMesh.rotation.y=Math.PI;capeMesh.position.y=-.58;cape.add(capeMesh);
+for(let i=0;i<7;i++){
+ const a=-1.25+i*.42;
+ orb(cape,i%3===0?M.patch:M.stitch,Math.sin(a)*.42,-.95,Math.cos(a)*-.32,.085,.09,.02);
+}
+orb(body,MAT.scarf,0,1.48,0,.43,.16,.36);
+const scarfTail=new THREE.Group();scarfTail.position.set(-.28,1.48,-.27);body.add(scarfTail);
+const tail=bar(scarfTail,MAT.scarf,-.32,-.08,0,.75,.16,.08);tail.rotation.z=-.12;
 function mkArm(sx) {
-  const piv = new THREE.Group();
-  piv.position.set(sx, 1.02, 0);
-  body.add(piv);
-  add(piv, new THREE.BoxGeometry(0.18, 0.55, 0.2), MAT.shirt, 0, -0.27, 0);
-  add(piv, new THREE.BoxGeometry(0.2, 0.14, 0.22), MAT.leather, 0, -0.6, 0);
-  return piv;
+ const piv=new THREE.Group();piv.position.set(sx,1.35,0);body.add(piv);
+ orb(piv,MAT.shirt,0,-.25,0,.17,.32,.18);
+ orb(piv,MAT.leather,0,-.55,.01,.19,.16,.19);
+ orb(piv,MAT.skin,0,-.67,.03,.15,.12,.16);
+ return piv;
 }
-const armL = mkArm(-0.4);
-const armR = mkArm(0.4);
-
-add(body, new THREE.SphereGeometry(0.34, 20, 16), MAT.skin, 0, 1.46, 0);
-add(body, new THREE.SphereGeometry(0.05, 8, 6), MAT.black, 0.12, 1.44, 0.3);
-add(body, new THREE.SphereGeometry(0.05, 8, 6), MAT.black, -0.12, 1.44, 0.3);
-const hairData = [[0, 0.22, -0.05, 0.36], [-0.22, 0.12, -0.14, 0.2], [0.22, 0.12, -0.14, 0.2], [-0.12, 0.28, -0.2, 0.2], [0.12, 0.3, -0.18, 0.2], [0, 0.36, -0.2, 0.22]];
-for (const [x, y, z, r] of hairData) add(body, new THREE.SphereGeometry(r, 14, 10), MAT.hair, x, 1.46 + y, z);
-add(body, new THREE.TorusGeometry(0.12, 0.035, 8, 20), MAT.brass, 0.14, 1.6, 0.3);
-add(body, new THREE.TorusGeometry(0.12, 0.035, 8, 20), MAT.brass, -0.14, 1.6, 0.3);
-add(body, new THREE.SphereGeometry(0.08, 10, 8), MAT.glass, 0.14, 1.6, 0.33);
-add(body, new THREE.SphereGeometry(0.08, 10, 8), MAT.glass, -0.14, 1.6, 0.33);
-
-// Hammer on right shoulder
-const hPiv = new THREE.Group();
-hPiv.position.set(0.4, 1.02, 0.05);
-hPiv.rotation.x = -0.6;
-body.add(hPiv);
-const handle = add(hPiv, new THREE.CylinderGeometry(0.04, 0.05, 1.2, 8), MAT.leather, 0, 0, 0.6);
-handle.rotation.x = Math.PI / 2;
-const hammerHead = makeGear(0.32, 8, MAT.glow);
-hammerHead.position.set(0, 0, 1.25);
-hPiv.add(hammerHead);
-
+const armL=mkArm(-.48),armR=mkArm(.48);
+orb(body,MAT.skin,0,1.94,.04,.43,.46,.39);
+orb(body,M.blush,-.32,1.88,.33,.09,.06,.025);
+orb(body,M.blush,.32,1.88,.33,.09,.06,.025);
+orb(body,M.mouth,0,1.78,.403,.16,.045,.018);
+for(const sx of [-1,1]){
+ orb(body,MAT.white,sx*.19,1.98,.385,.135,.16,.055);
+ orb(body,M.iris,sx*.19,1.98,.434,.082,.105,.028);
+ orb(body,MAT.black,sx*.19,1.98,.46,.043,.069,.016);
+ orb(body,MAT.white,sx*.17,2.03,.479,.023,.028,.012);
+}
+orb(body,MAT.skin,0,1.89,.437,.09,.11,.10);
+for(let i=0;i<22;i++){
+ const a=i*2.39996,rad=.15+.20*Math.sqrt(i/22);
+ const x=Math.cos(a)*rad,z=Math.sin(a)*rad-.07;
+ const curl=orb(body,i%4===0?M.hairLight:MAT.hair,x,2.28+Math.sin(i*1.7)*.09,z,.15,.18,.17);
+ curl.rotation.z=Math.sin(i)*.6;
+}
+for(const sx of [-1,1]){
+ const rim=add(body,new THREE.TorusGeometry(.165,.047,8,20),M.copper,sx*.19,2.28,.32);
+ rim.rotation.z=sx*.12;
+ orb(body,MAT.glass,sx*.19,2.28,.33,.13,.13,.03);
+}
+const strap=bar(body,MAT.leather,0,2.28,.04,.76,.075,.06);
+const hPiv=new THREE.Group();hPiv.position.set(.48,1.35,.04);hPiv.rotation.x=-.6;body.add(hPiv);
+const handle=add(hPiv,new THREE.CylinderGeometry(.055,.065,1.5,10),MAT.leather,0,0,.72);handle.rotation.x=Math.PI/2;
+for(let i=0;i<6;i++)bar(hPiv,M.buckle,0,.065,.27+i*.15,.14,.02,.025);
+const hammerHead=makeGear(.43,10,MAT.glow);hammerHead.position.set(0,0,1.48);hPiv.add(hammerHead);
+const hammerCore=orb(hammerHead,MAT.glow,0,0,.18,.18,.18,.1);
 // ---------- Sky decor ----------
 const cloudGeo = new THREE.SphereGeometry(1, 14, 10);
 for (let i = 0; i < 26; i++) {
@@ -553,7 +580,7 @@ function animateScene(dt, t) {
   legR.rotation.x = -Math.sin(walkT) * 0.8 * walk;
   armL.rotation.x = -Math.sin(walkT) * 0.5 * walk;
   body.position.y = 0.11 + Math.abs(Math.sin(walkT)) * 0.05 * walk;
-  cape.rotation.x = 0.1 + speed * 0.02;
+  cape.rotation.x = 0.08 + speed * 0.025 + Math.sin(t * 4) * 0.06;
   scarfTail.rotation.x = Math.sin(t * 6) * 0.2 - speed * 0.03;
 
   // Hammer swing
