@@ -9,6 +9,7 @@
   html,body{margin:0;height:100%;overflow:hidden;background:#1b1030;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;touch-action:none;-webkit-user-select:none;user-select:none}
   canvas{display:block}
   #hud{position:fixed;top:12px;left:12px;color:#fff3d6;font-weight:800;font-size:18px;text-shadow:0 2px 4px #000;pointer-events:none;z-index:4}
+  #cameraMode{position:fixed;top:14px;right:14px;z-index:8;margin:0;padding:11px 15px;border:2px solid #e7b967;border-radius:14px;background:rgba(30,19,40,.8);color:#fff;font-size:14px;backdrop-filter:blur(6px)}
   #msg{position:fixed;top:12%;left:50%;transform:translateX(-50%);color:#ffe08a;font-size:20px;font-weight:800;text-shadow:0 2px 6px #000;text-align:center;width:92%;pointer-events:none;z-index:4}
   .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(20,8,30,.82);color:#fff;text-align:center;padding:24px;box-sizing:border-box;z-index:10}
   .overlay h1{font-size:54px;margin:0 0 8px;color:#ffb534;text-shadow:0 4px 0 #6b3a10}
@@ -26,6 +27,7 @@
 <body>
 <div id="hud">Dişli: <span id="cnt">0</span>/4</div>
 <div id="msg" class="hidden"></div>
+<button id="cameraMode" aria-label="Kamera modunu değiştir">📷 Takip</button>
 <div id="stick"></div>
 <div id="base"><div id="knob"></div></div>
 <button id="jump" class="btn">ZIPLA</button>
@@ -36,7 +38,7 @@
   <p>Küçük fikirler, büyük maceralara dönüşür.</p>
   <p>Gökyüzündeki yüzen adalarda 4 dişli topla, saat kulesinin tepesine tırman.</p>
   <p><b>Telefon:</b> Sol taraf hareket · ZIPLA · ÇEKİÇ (dişli platform üretir, robot kuşları sersemletir)<br>
-     <b>Bilgisayar:</b> WASD / ok tuşları · Boşluk (zıpla) · F (çekiç)</p>
+     <b>Bilgisayar:</b> WASD / ok tuşları · Boşluk (zıpla) · F (çekiç) · C (kamera) · Fare ile döndür · Tekerlek ile yakınlaş</p>
   <button id="play">Oyna</button>
 </div>
 
@@ -612,19 +614,57 @@ function animateScene(dt, t) {
   sun.target.updateMatrixWorld();
 }
 
-// ---------- Camera ----------
+// ---------- Switchable 3D camera ----------
 const camPos = new THREE.Vector3(), camTarget = new THREE.Vector3();
+let cameraMode = 'follow', orbitYaw = yaw + Math.PI, orbitPitch = 0.32, orbitDistance = 10;
+let draggingCamera = false, dragPointer = null, dragX = 0, dragY = 0;
+const cameraButton = $('cameraMode');
+function setCameraMode(mode) {
+  cameraMode = mode;
+  cameraButton.textContent = mode === 'follow' ? '📷 Takip' : '🎥 Serbest';
+  cameraButton.setAttribute('aria-label', mode === 'follow' ? 'Serbest kameraya geç' : 'Takip kamerasına geç');
+  if (mode === 'free') { orbitYaw = yaw + Math.PI; orbitPitch = 0.32; }
+}
+cameraButton.addEventListener('click', () => setCameraMode(cameraMode === 'follow' ? 'free' : 'follow'));
+const cameraCanvas = renderer.domElement;
+cameraCanvas.addEventListener('pointerdown', e => {
+  if (cameraMode !== 'free' || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  if (e.pointerType !== 'mouse' && e.clientX < innerWidth * 0.5) return;
+  draggingCamera = true; dragPointer = e.pointerId; dragX = e.clientX; dragY = e.clientY;
+  cameraCanvas.setPointerCapture(e.pointerId);
+});
+cameraCanvas.addEventListener('pointermove', e => {
+  if (!draggingCamera || e.pointerId !== dragPointer) return;
+  orbitYaw -= (e.clientX - dragX) * 0.006;
+  orbitPitch = clamp(orbitPitch + (e.clientY - dragY) * 0.004, -0.25, 1.2);
+  dragX = e.clientX; dragY = e.clientY;
+});
+function stopCameraDrag(e) { if (e.pointerId === dragPointer) { draggingCamera = false; dragPointer = null; } }
+cameraCanvas.addEventListener('pointerup', stopCameraDrag);
+cameraCanvas.addEventListener('pointercancel', stopCameraDrag);
+cameraCanvas.addEventListener('wheel', e => {
+  if (cameraMode !== 'free') return;
+  orbitDistance = clamp(orbitDistance + e.deltaY * 0.012, 4, 22);
+  e.preventDefault();
+}, { passive: false });
 function updateCamera(dt) {
   const fx = Math.sin(yaw), fz = Math.cos(yaw);
-  camPos.set(px - fx * 8.5, py + 4.2, pz - fz * 8.5);
-  camera.position.lerp(camPos, Math.min(1, dt * 6));
-  camTarget.set(px + fx * 1.5, py + 1.4, pz + fz * 1.5);
+  if (cameraMode === 'follow') {
+    camPos.set(px - fx * 8.5, py + 4.2, pz - fz * 8.5);
+    camTarget.set(px + fx * 1.5, py + 1.4, pz + fz * 1.5);
+  } else {
+    const horizontal = orbitDistance * Math.cos(orbitPitch);
+    camPos.set(px + Math.sin(orbitYaw) * horizontal, py + 1.5 + Math.sin(orbitPitch) * orbitDistance, pz + Math.cos(orbitYaw) * horizontal);
+    camTarget.set(px, py + 1.3, pz);
+  }
+  camera.position.lerp(camPos, Math.min(1, dt * 7));
   camera.lookAt(camTarget);
 }
 
 // ---------- Controls ----------
 addEventListener('keydown', e => {
   keys[e.code] = true;
+  if (e.code === 'KeyC' && !e.repeat) setCameraMode(cameraMode === 'follow' ? 'free' : 'follow');
   if (e.code === 'Space') { jumpReq = true; e.preventDefault(); }
   if (e.code === 'KeyF' || e.code === 'KeyJ') attackReq = true;
 });
