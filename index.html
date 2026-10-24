@@ -152,6 +152,53 @@ function makeGear(r, teeth, material) {
   return g;
 }
 
+// ---------- High-detail procedural PBR terrain textures ----------
+// Canvas textures are generated locally so the game stays self-contained on GitHub Pages.
+function terrainTexture(kind) {
+ const c=document.createElement('canvas');c.width=c.height=512;
+ const ctx=c.getContext('2d');const im=ctx.createImageData(512,512);
+ let seed=kind==='stone'?4171:kind==='grass'?9533:7291;
+ const rand=()=>{seed=(1664525*seed+1013904223)>>>0;return seed/4294967296;};
+ const coarse=new Float32Array(64*64);
+ for(let i=0;i<coarse.length;i++)coarse[i]=rand();
+ const smoothNoise=(x,y)=>{
+  const xx=x/8,yy=y/8,x0=Math.floor(xx),y0=Math.floor(yy),fx=xx-x0,fy=yy-y0;
+  const get=(a,b)=>coarse[((b+64)%64)*64+((a+64)%64)];
+  const u=fx*fx*(3-2*fx),v=fy*fy*(3-2*fy);
+  return (get(x0,y0)*(1-u)+get(x0+1,y0)*u)*(1-v)+(get(x0,y0+1)*(1-u)+get(x0+1,y0+1)*u)*v;
+ };
+ for(let y=0;y<512;y++)for(let x=0;x<512;x++){
+  const n=smoothNoise(x,y),fine=rand(),k=(y*512+x)*4;
+  let r,g,b;
+  if(kind==='stone'){const v=(n-.5)*83+(fine-.5)*35;r=113+v;g=103+v;b=101+v;}
+  else if(kind==='grass'){const v=(n-.5)*100+(fine-.5)*49;r=71+v*.67;g=111+v;b=52+v*.48;}
+  else {const v=(n-.5)*68+(fine-.5)*40;r=68+v;g=90+v;b=58+v*.7;}
+  im.data[k]=Math.max(0,Math.min(255,r));im.data[k+1]=Math.max(0,Math.min(255,g));im.data[k+2]=Math.max(0,Math.min(255,b));im.data[k+3]=255;
+ }
+ ctx.putImageData(im,0,0);
+ const tx=new THREE.CanvasTexture(c);tx.colorSpace=THREE.SRGBColorSpace;
+ tx.wrapS=tx.wrapT=THREE.RepeatWrapping;tx.repeat.set(2,2);
+ tx.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());
+ return tx;
+}
+MAT.rock.map=terrainTexture('stone');MAT.rock.color.set(0xffffff);MAT.rock.needsUpdate=true;
+MAT.grass.map=terrainTexture('grass');MAT.grass.color.set(0xffffff);MAT.grass.needsUpdate=true;
+MAT.moss.map=terrainTexture('moss');MAT.moss.color.set(0xffffff);MAT.moss.needsUpdate=true;
+
+// Rounded, irregular stone shapes break up the original cylindrical level silhouette.
+function cliffMesh(radius,height,seed) {
+ const g=new THREE.CylinderGeometry(radius*.96,radius*.74,height,48,8);
+ const p=g.attributes.position;
+ for(let i=0;i<p.count;i++){
+  const x=p.getX(i),y=p.getY(i),z=p.getZ(i);
+  const angle=Math.atan2(z,x),layer=y/height;
+  const noise=Math.sin(angle*7+seed)*.13+Math.sin(angle*13+layer*8+seed)*.055+Math.cos(layer*11+angle*4)*.08;
+  const factor=1+noise;
+  p.setXYZ(i,x*factor,y,z*factor);
+ }
+ g.computeVertexNormals();return g;
+}
+
 // ---------- World state ----------
 const surfaces = [];       // landable tops: {type:'circle'|'box', x, z, r|hx/hz, top, cp?}
 const collectibles = [];
@@ -171,16 +218,24 @@ function removeSurf(s) {
 function island(x, t, z, r, opts = {}) {
   const g = new THREE.Group();
   const h = opts.h || 4;
-  add(g, new THREE.CylinderGeometry(r, r * 0.9, h, 28), MAT.rock, 0, -h / 2, 0);
-  add(g, new THREE.CylinderGeometry(r, r, 0.5, 28), MAT.grass, 0, 0.25, 0);
-  const cone = add(g, new THREE.ConeGeometry(r * 0.6, h * 1.5, 16), MAT.rock, 0, -1.75 * h + 0.1, 0);
+  add(g, cliffMesh(r,h,x*.31+z*.19), MAT.rock, 0, -h / 2, 0);
+  add(g, new THREE.CylinderGeometry(r, r, 0.5, 48), MAT.grass, 0, 0.25, 0);
+  const cone = add(g, new THREE.ConeGeometry(r * 0.6, h * 1.5, 32), MAT.rock, 0, -1.75 * h + 0.1, 0);
   cone.rotation.x = Math.PI;
+  // Multi-layer foliage clusters replace the primitive cone trees.
+  const foliage = new THREE.MeshStandardMaterial({color:0x385d36,roughness:1,flatShading:false});
+  const foliageLight = new THREE.MeshStandardMaterial({color:0x61894c,roughness:1});
   if (opts.trees) {
     for (let i = 0; i < opts.trees; i++) {
       const a = Math.random() * Math.PI * 2, d = Math.random() * r * 0.6;
       const tx = Math.cos(a) * d, tz = Math.sin(a) * d;
       add(g, new THREE.CylinderGeometry(0.12, 0.15, 0.8, 6), MAT.spire, tx, 0.9, tz);
-      add(g, new THREE.ConeGeometry(0.8, 2, 8), MAT.tree, tx, 2.3, tz);
+      for(let j=0;j<8;j++){
+        const ang=j*2.39996,level=(j%3)*.43;
+        const crown=add(g,new THREE.IcosahedronGeometry(.55+(j%2)*.2,1),
+          j%3===0?foliageLight:foliage,tx+Math.cos(ang)*.43,2.05+level,tz+Math.sin(ang)*.43);
+        crown.scale.set(1.15,.88,1.1);
+      }
     }
   }
   // Layered rock cliffs and ground detail, reproducible per island.
