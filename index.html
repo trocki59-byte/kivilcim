@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#f4a46a">
+<title>KIVILCIM</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#1b1030;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;touch-action:none;-webkit-user-select:none;user-select:none}
+  canvas{display:block}
+  #hud{position:fixed;top:12px;left:12px;color:#fff3d6;font-weight:800;font-size:18px;text-shadow:0 2px 4px #000;pointer-events:none;z-index:4}
+  #msg{position:fixed;top:12%;left:50%;transform:translateX(-50%);color:#ffe08a;font-size:20px;font-weight:800;text-shadow:0 2px 6px #000;text-align:center;width:92%;pointer-events:none;z-index:4}
+  .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(20,8,30,.82);color:#fff;text-align:center;padding:24px;box-sizing:border-box;z-index:10}
+  .overlay h1{font-size:54px;margin:0 0 8px;color:#ffb534;text-shadow:0 4px 0 #6b3a10}
+  .overlay p{max-width:460px;line-height:1.5;margin:8px 0}
+  button{font:inherit;font-weight:800;border:0;border-radius:14px;padding:14px 30px;background:#ffb534;color:#3b1d05;font-size:18px;cursor:pointer;margin-top:14px}
+  .hidden{display:none !important}
+  #stick{position:fixed;left:0;top:0;width:50%;height:100%;z-index:5}
+  #base{position:fixed;width:120px;height:120px;margin:-60px 0 0 -60px;border-radius:50%;background:rgba(255,255,255,.15);border:2px solid rgba(255,255,255,.4);display:none;pointer-events:none;z-index:6}
+  #knob{position:absolute;left:30px;top:30px;width:60px;height:60px;border-radius:50%;background:rgba(255,200,80,.6);border:2px solid #fff3d6}
+  .btn{position:fixed;width:84px;height:84px;border-radius:50%;background:rgba(255,255,255,.2);border:3px solid rgba(255,255,255,.55);color:#fff;font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center;z-index:7;touch-action:none;margin:0;padding:0}
+  #jump{right:20px;bottom:30px}
+  #hit{right:118px;bottom:70px}
+</style>
+</head>
+<body>
+<div id="hud">Dişli: <span id="cnt">0</span>/4</div>
+<div id="msg" class="hidden"></div>
+<div id="stick"></div>
+<div id="base"><div id="knob"></div></div>
+<button id="jump" class="btn">ZIPLA</button>
+<button id="hit" class="btn">ÇEKİÇ</button>
+
+<div id="start" class="overlay">
+  <h1>KIVILCIM</h1>
+  <p>Küçük fikirler, büyük maceralara dönüşür.</p>
+  <p>Gökyüzündeki yüzen adalarda 4 dişli topla, saat kulesinin tepesine tırman.</p>
+  <p><b>Telefon:</b> Sol taraf hareket · ZIPLA · ÇEKİÇ (dişli platform üretir, robot kuşları sersemletir)<br>
+     <b>Bilgisayar:</b> WASD / ok tuşları · Boşluk (zıpla) · F (çekiç)</p>
+  <button id="play">Oyna</button>
+</div>
+
+<div id="win" class="overlay hidden">
+  <h1>Saat Çalıştı!</h1>
+  <p>Kıvılcım kulenin tepesinde. Dört dişli yerine oturdu ve Dişli Ada yeniden dönmeye başladı.</p>
+  <button id="again">Tekrar Oyna</button>
+</div>
+
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const angleDiff = (a, b) => { let d = (a - b + Math.PI) % (Math.PI * 2); if (d < 0) d += Math.PI * 2; return d - Math.PI; };
+const tmpV = new THREE.Vector3();
+
+// ---------- Renderer & scene ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+const SKY = 0xf4a46a;
+scene.background = new THREE.Color(SKY);
+scene.fog = new THREE.Fog(SKY, 80, 240);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 400);
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// Lights
+scene.add(new THREE.HemisphereLight(0xfff1d6, 0x6a3b22, 1.1));
+const sun = new THREE.DirectionalLight(0xffdca0, 1.8);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 200 });
+sun.shadow.camera.updateProjectionMatrix();
+scene.add(sun, sun.target);
+
+const sunDisc = new THREE.Mesh(
+  new THREE.SphereGeometry(12, 24, 16),
+  new THREE.MeshBasicMaterial({ color: 0xfff0b8, fog: false })
+);
+sunDisc.position.set(-90, 80, -200);
+scene.add(sunDisc);
+
+// ---------- Materials ----------
+const mat = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.8, metalness: 0, ...o });
+const MAT = {
+  grass: mat(0x86b853),
+  rock: mat(0x8f6b52),
+  rust: mat(0xa5552c, { roughness: 0.9 }),
+  brass: mat(0xd9a441, { metalness: 0.8, roughness: 0.3 }),
+  glow: mat(0xffb84a, { metalness: 0.6, roughness: 0.25, emissive: 0xff7a10, emissiveIntensity: 0.6 }),
+  shirt: mat(0xf2e6cf),
+  pants: mat(0x5b4632),
+  leather: mat(0x6b3d1e),
+  skin: mat(0xffcf9e),
+  hair: mat(0xff6a1f, { roughness: 0.6 }),
+  scarf: mat(0xffc23a),
+  cape: mat(0x2d6b3c),
+  bird: mat(0x7d8a96, { metalness: 0.5, roughness: 0.4 }),
+  eye: new THREE.MeshBasicMaterial({ color: 0xff3030 }),
+  black: mat(0x222222),
+  white: mat(0xffffff),
+  tree: mat(0x3f7a3a),
+  spire: mat(0x9b6a43),
+  glass: mat(0x3a4a5a, { metalness: 0.9, roughness: 0.1 }),
+  cloud: mat(0xfff4f0, { emissive: 0xffd6b0, emissiveIntensity: 0.3 }),
+  mountain: mat(0xb87a9a, { roughness: 1 })
+};
+
+function add(parent, geo, material, x = 0, y = 0, z = 0) {
+  const m = new THREE.Mesh(geo, material);
+  m.position.set(x, y, z);
+  parent.add(m);
+  return m;
+}
+
+// Gear built from primitives: axis along +z
+function makeGear(r, teeth, material) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.85, r * 0.85, r * 0.3, 28), material);
+  body.rotation.x = Math.PI / 2;
+  g.add(body);
+  const toothGeo = new THREE.BoxGeometry(r * 0.36, r * 0.26, r * 0.3);
+  for (let i = 0; i < teeth; i++) {
+    const a = (i / teeth) * Math.PI * 2;
+    const t = new THREE.Mesh(toothGeo, material);
+    t.position.set(Math.cos(a) * r * 0.92, Math.sin(a) * r * 0.92, 0);
+    t.rotation.z = a;
+    g.add(t);
+  }
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.28, r * 0.28, r * 0.34, 16), MAT.black);
+  hub.rotation.x = Math.PI / 2;
+  g.add(hub);
+  return g;
+}
+
+// ---------- World state ----------
+const surfaces = [];       // landable tops: {type:'circle'|'box', x, z, r|hx/hz, top, cp?}
+const collectibles = [];
+const birds = [];
+const temps = [];          // hammer-made gear pads
+const parts = [];          // spark particles
+const TX = 0, TZ = -36;    // clock tower center
+const START_CP = { x: 0, y: 0.2, z: 22 };
+let checkpoint = START_CP;
+
+function removeSurf(s) {
+  const i = surfaces.indexOf(s);
+  if (i >= 0) surfaces.splice(i, 1);
+}
+
+// ---------- Islands ----------
+function island(x, t, z, r, opts = {}) {
+  const g = new THREE.Group();
+  const h = opts.h || 4;
+  add(g, new THREE.CylinderGeometry(r, r * 0.9, h, 28), MAT.rock, 0, -h / 2, 0);
+  add(g, new THREE.CylinderGeometry(r, r, 0.5, 28), MAT.grass, 0, 0.25, 0);
+  const cone = add(g, new THREE.ConeGeometry(r * 0.6, h * 1.5, 16), MAT.rock, 0, -1.75 * h + 0.1, 0);
+  cone.rotation.x = Math.PI;
+  if (opts.trees) {
+    for (let i = 0; i < opts.trees; i++) {
+      const a = Math.random() * Math.PI * 2, d = Math.random() * r * 0.6;
+      const tx = Math.cos(a) * d, tz = Math.sin(a) * d;
+      add(g, new THREE.CylinderGeometry(0.12, 0.15, 0.8, 6), MAT.spire, tx, 0.9, tz);
+      add(g, new THREE.ConeGeometry(0.8, 2, 8), MAT.tree, tx, 2.3, tz);
+    }
+  }
+  g.position.set(x, t - 0.5, z);
+  scene.add(g);
+
+  const s = { type: 'circle', x, z, r, top: t, cp: { x, y: t + 0.2, z } };
+  surfaces.push(s);
+
+  if (opts.gear) {
+    const gear = makeGear(0.5, 10, MAT.glow);
+    gear.position.set(x, t + 1.2, z);
+    scene.add(gear);
+    collectibles.push({ g: gear, x, y: t + 1.2, z, got: false });
+  }
+  return s;
+}
+
+island(0, 0, 22, 7, { trees: 3 });                 // start
+island(-5, 1.0, 13, 3.5, { gear: true });
+island(1, 2.2, 5, 3.5, { trees: 1 });
+island(-3, 3.4, -4, 4, { gear: true, trees: 2 });
+island(5, 4.5, -12, 4, { gear: true });
+island(3, 5.5, -20, 3.5, { gear: true, trees: 1 });
+island(TX, 6.0, TZ, 8, { h: 6, trees: 4 });        // tower island
+
+// ---------- Clock tower + spiral steps ----------
+const TOP = { type: 'circle', x: TX, z: TZ, r: 8, top: 21, cp: { x: TX, y: 21.2, z: TZ } };
+let clockHands;
+function buildTower() {
+  add(scene, new THREE.CylinderGeometry(4.6, 5.2, 14.5, 28), MAT.rock, TX, 13.25, TZ);
+  add(scene, new THREE.CylinderGeometry(8, 8, 1, 32), MAT.rust, TX, 20.5, TZ);
+  const ring = add(scene, new THREE.TorusGeometry(8, 0.3, 8, 40), MAT.brass, TX, 21.3, TZ);
+  ring.rotation.x = Math.PI / 2;
+
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    add(scene, new THREE.ConeGeometry(0.9, 4, 10), MAT.spire, TX + Math.cos(a) * 6.5, 23, TZ + Math.sin(a) * 6.5);
+  }
+
+  // Clock face on the +z side
+  const bezel = add(scene, new THREE.CylinderGeometry(3, 3, 0.3, 32), MAT.brass, TX, 14, TZ + 4.9);
+  bezel.rotation.x = Math.PI / 2;
+  const face = add(scene, new THREE.CylinderGeometry(2.6, 2.6, 0.32, 32), MAT.white, TX, 14, TZ + 5.05);
+  face.rotation.x = Math.PI / 2;
+  clockHands = new THREE.Group();
+  clockHands.position.set(TX, 14, TZ + 5.25);
+  add(clockHands, new THREE.BoxGeometry(0.14, 1.2, 0.05), MAT.brass, 0, 0.6, 0);
+  add(clockHands, new THREE.BoxGeometry(0.1, 1.8, 0.04), MAT.black, 0, 0.9, 0);
+  scene.add(clockHands);
+
+  // Spiral of steps around the tower
+  for (let i = 0; i < 10; i++) {
+    const a = i * 0.55;
+    const top = 7.9 + 1.4 * i;
+    const x = TX + Math.cos(a) * 12, z = TZ + Math.sin(a) * 12;
+    add(scene, new THREE.CylinderGeometry(2, 2, 0.6, 20), MAT.rust, x, top - 0.3, z);
+    surfaces.push({ type: 'circle', x, z, r: 2, top, cp: null });
+  }
+  surfaces.push(TOP);
+}
+buildTower();
+
+// ---------- Collectible gears spin tracking ----------
+// (animated in animateScene)
+
+// ---------- Robot birds ----------
+const BIRD_CFG = [
+  { cx: -5, cz: 13, R: 3, h: 2.6, s: 0.9 },
+  { cx: -3, cz: -4, R: 4, h: 4.8, s: 0.8 },
+  { cx: 5, cz: -12, R: 3, h: 6.5, s: 1.0 },
+  { cx: 3, cz: -20, R: 2.5, h: 8.2, s: 1.1 }
+];
+function makeBird(cfg) {
+  const g = new THREE.Group();
+  const b = add(g, new THREE.SphereGeometry(0.42, 16, 12), MAT.bird, 0, 0, 0);
+  b.scale.set(1, 0.75, 1.5);
+  add(g, new THREE.SphereGeometry(0.2, 12, 10), MAT.bird, 0, 0.25, 0.5);
+  add(g, new THREE.SphereGeometry(0.06, 8, 6), MAT.eye, 0.09, 0.3, 0.68);
+  add(g, new THREE.SphereGeometry(0.06, 8, 6), MAT.eye, -0.09, 0.3, 0.68);
+  const wL = add(g, new THREE.BoxGeometry(0.9, 0.06, 0.4), MAT.brass, 0.6, 0, 0);
+  const wR = add(g, new THREE.BoxGeometry(0.9, 0.06, 0.4), MAT.brass, -0.6, 0, 0);
+  scene.add(g);
+  return { ...cfg, g, wL, wR, ang: Math.random() * Math.PI * 2, stun: 0 };
+}
+BIRD_CFG.forEach(c => birds.push(makeBird(c)));
+
+// ---------- Player (Kıvılcım) ----------
+const player = new THREE.Group();
+const body = new THREE.Group();
+player.add(body);
+scene.add(player);
+
+function mkLeg(sx) {
+  const piv = new THREE.Group();
+  piv.position.set(sx, 0.5, 0);
+  body.add(piv);
+  add(piv, new THREE.BoxGeometry(0.28, 0.4, 0.3), MAT.pants, 0, -0.2, 0);
+  add(piv, new THREE.BoxGeometry(0.3, 0.22, 0.4), MAT.leather, 0, -0.5, 0.04);
+  return piv;
+}
+const legL = mkLeg(-0.17), legR = mkLeg(0.17);
+
+add(body, new THREE.BoxGeometry(0.62, 0.62, 0.36), MAT.shirt, 0, 0.82, 0);
+add(body, new THREE.BoxGeometry(0.66, 0.1, 0.4), MAT.leather, 0, 0.52, 0);
+add(body, new THREE.BoxGeometry(0.12, 0.1, 0.02), MAT.brass, 0, 0.52, 0.21);
+const beltGear = makeGear(0.1, 8, MAT.brass);
+beltGear.position.set(0, 0.52, 0.22);
+body.add(beltGear);
+const cape = add(body, new THREE.BoxGeometry(0.62, 0.85, 0.05), MAT.cape, 0, 0.85, -0.22);
+add(body, new THREE.BoxGeometry(0.44, 0.14, 0.42), MAT.scarf, 0, 1.16, 0);
+const scarfTail = add(body, new THREE.BoxGeometry(0.12, 0.5, 0.06), MAT.scarf, -0.2, 0.9, -0.28);
+
+function mkArm(sx) {
+  const piv = new THREE.Group();
+  piv.position.set(sx, 1.02, 0);
+  body.add(piv);
+  add(piv, new THREE.BoxGeometry(0.18, 0.55, 0.2), MAT.shirt, 0, -0.27, 0);
+  add(piv, new THREE.BoxGeometry(0.2, 0.14, 0.22), MAT.leather, 0, -0.6, 0);
+  return piv;
+}
+const armL = mkArm(-0.4);
+const armR = mkArm(0.4);
+
+add(body, new THREE.SphereGeometry(0.34, 20, 16), MAT.skin, 0, 1.46, 0);
+add(body, new THREE.SphereGeometry(0.05, 8, 6), MAT.black, 0.12, 1.44, 0.3);
+add(body, new THREE.SphereGeometry(0.05, 8, 6), MAT.black, -0.12, 1.44, 0.3);
+const hairData = [[0, 0.22, -0.05, 0.36], [-0.22, 0.12, -0.14, 0.2], [0.22, 0.12, -0.14, 0.2], [-0.12, 0.28, -0.2, 0.2], [0.12, 0.3, -0.18, 0.2], [0, 0.36, -0.2, 0.22]];
+for (const [x, y, z, r] of hairData) add(body, new THREE.SphereGeometry(r, 14, 10), MAT.hair, x, 1.46 + y, z);
+add(body, new THREE.TorusGeometry(0.12, 0.035, 8, 20), MAT.brass, 0.14, 1.6, 0.3);
+add(body, new THREE.TorusGeometry(0.12, 0.035, 8, 20), MAT.brass, -0.14, 1.6, 0.3);
+add(body, new THREE.SphereGeometry(0.08, 10, 8), MAT.glass, 0.14, 1.6, 0.33);
+add(body, new THREE.SphereGeometry(0.08, 10, 8), MAT.glass, -0.14, 1.6, 0.33);
+
+// Hammer on right shoulder
+const hPiv = new THREE.Group();
+hPiv.position.set(0.4, 1.02, 0.05);
+hPiv.rotation.x = -0.6;
+body.add(hPiv);
+const handle = add(hPiv, new THREE.CylinderGeometry(0.04, 0.05, 1.2, 8), MAT.leather, 0, 0, 0.6);
+handle.rotation.x = Math.PI / 2;
+const hammerHead = makeGear(0.32, 8, MAT.glow);
+hammerHead.position.set(0, 0, 1.25);
+hPiv.add(hammerHead);
+
+// ---------- Sky decor ----------
+const cloudGeo = new THREE.SphereGeometry(1, 14, 10);
+for (let i = 0; i < 26; i++) {
+  const c = new THREE.Group();
+  for (let j = 0; j < 4; j++) {
+    const s = new THREE.Mesh(cloudGeo, MAT.cloud);
+    s.position.set((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 1.2, (Math.random() - 0.5) * 3);
+    s.scale.setScalar(2 + Math.random() * 2.5);
+    c.add(s);
+  }
+  c.position.set((Math.random() - 0.5) * 260, 40 + Math.random() * 30, -260 + Math.random() * 300);
+  scene.add(c);
+}
+for (let i = 0; i < 12; i++) {
+  const a = (i / 12) * Math.PI * 2;
+  const m = new THREE.Mesh(new THREE.ConeGeometry(18 + Math.random() * 20, 60 + Math.random() * 40, 6), MAT.mountain);
+  m.position.set(Math.cos(a) * 170, -60, Math.sin(a) * 170 - 60);
+  scene.add(m);
+}
+
+// ---------- Helpers: physics / hammer / particles ----------
+function inside(s, x, z) {
+  if (s.type === 'circle') {
+    const dx = x - s.x, dz = z - s.z;
+    return dx * dx + dz * dz <= s.r * s.r;
+  }
+  return Math.abs(x - s.x) <= s.hx && Math.abs(z - s.z) <= s.hz;
+}
+
+function sparks(x, y, z, n = 12) {
+  const geo = new THREE.SphereGeometry(0.08, 6, 5);
+  for (let i = 0; i < n; i++) {
+    const m = new THREE.Mesh(geo, MAT.glow);
+    m.position.set(x, y, z);
+    scene.add(m);
+    parts.push({ m, v: new THREE.Vector3((Math.random() - 0.5) * 6, Math.random() * 5, (Math.random() - 0.5) * 6), life: 0.7 });
+  }
+}
+
+function makePad(x, top, z) {
+  if (temps.length >= 3) {
+    const old = temps.shift();
+    scene.remove(old.g);
+    removeSurf(old.s);
+  }
+  const g = makeGear(1.8, 10, MAT.glow);
+  g.rotation.x = -Math.PI / 2;
+  g.position.set(x, top - 0.27, z);
+  scene.add(g);
+  const s = { type: 'box', x, z, hx: 1.6, hz: 1.6, top, cp: null };
+  surfaces.push(s);
+  temps.push({ g, s, life: 7 });
+}
+
+// Player state
+let px = 0, py = 0.2, pz = 22, vy = 0, yaw = Math.PI, vxS = 0, vzS = 0;
+let prevY = py, grounded = false, ground = null;
+let jumpReq = false, attackReq = false, jumpBuf = 0, attackT = 0, invuln = 0;
+let count = 0, won = false, started = false, walkT = 0;
+let jx = 0, jy = 0;
+let msgT = 0;
+
+const keys = {};
+const down = (...codes) => codes.some(c => keys[c]);
+const cntEl = $('cnt');
+const msgEl = $('msg');
+
+function showMsg(text, dur = 2.5) {
+  msgEl.textContent = text;
+  msgEl.classList.remove('hidden');
+  msgEl.style.opacity = 1;
+  msgT = dur;
+}
+
+function respawn() {
+  const c = checkpoint;
+  px = c.x; py = c.y; pz = c.z;
+  vy = 0; vxS = 0; vzS = 0;
+  prevY = py;
+  grounded = false; ground = null;
+}
+
+function startAttack() {
+  if (attackT > 0) return;
+  attackT = 0.4;
+  const fx = Math.sin(yaw), fz = Math.cos(yaw);
+  let hit = 0;
+  for (const b of birds) {
+    const dx = b.g.position.x - px, dz = b.g.position.z - pz;
+    const dy = Math.abs(b.g.position.y - (py + 1));
+    const d = Math.hypot(dx, dz);
+    if (d < 3.4 && dy < 3.5 && (d < 0.01 || (dx * fx + dz * fz) / d > 0.2)) {
+      b.stun = 3;
+      hit++;
+      sparks(b.g.position.x, b.g.position.y, b.g.position.z, 14);
+    }
+  }
+  if (hit) showMsg('Robot kuş sersemledi!');
+  const top = grounded ? py : py - 1.5;
+  makePad(px + fx * 2.8, top, pz + fz * 2.8);
+}
+
+function win() {
+  if (won) return;
+  won = true;
+  $('win').classList.remove('hidden');
+}
+
+function restart() {
+  count = 0;
+  cntEl.textContent = 0;
+  for (const c of collectibles) { c.got = false; c.g.visible = true; }
+  for (const b of birds) b.stun = 0;
+  for (const tp of temps) { scene.remove(tp.g); removeSurf(tp.s); }
+  temps.length = 0;
+  checkpoint = START_CP;
+  respawn();
+  won = false;
+  $('win').classList.add('hidden');
+  showMsg('Yeniden başlıyoruz!');
+}
+
+// ---------- Update (fixed logic) ----------
+function update(dt) {
+  // Input: keyboard + joystick
+  const kx = (down('KeyD', 'ArrowRight') ? 1 : 0) - (down('KeyA', 'ArrowLeft') ? 1 : 0);
+  const ky = (down('KeyW', 'ArrowUp') ? 1 : 0) - (down('KeyS', 'ArrowDown') ? 1 : 0);
+  const ix = clamp(kx + jx, -1, 1), iy = clamp(ky + jy, -1, 1);
+  const L = Math.hypot(ix, iy);
+  let wx = 0, wz = 0;
+  if (L > 0.05) { const m = Math.min(1, L); wx = ix / L * m; wz = -iy / L * m; }
+
+  const SPEED = 7.5;
+  const k = Math.min(1, dt * 10);
+  vxS += (wx * SPEED - vxS) * k;
+  vzS += (wz * SPEED - vzS) * k;
+  px += vxS * dt;
+  pz += vzS * dt;
+  if (L > 0.05) yaw += angleDiff(Math.atan2(wx, wz), yaw) * Math.min(1, dt * 12);
+
+  // Tower wall: can't walk through the column
+  if (py > 5.5 && py < 20.6) {
+    const dx = px - TX, dz = pz - TZ, d = Math.hypot(dx, dz);
+    if (d < 5.1 && d > 0.001) { px = TX + dx / d * 5.1; pz = TZ + dz / d * 5.1; }
+  }
+
+  // Jump (buffered) and attack
+  if (jumpReq) { jumpBuf = 0.15; jumpReq = false; }
+  if (jumpBuf > 0) {
+    jumpBuf -= dt;
+    if (grounded) { vy = 10; grounded = false; jumpBuf = 0; }
+  }
+  if (attackReq) { attackReq = false; startAttack(); }
+
+  // Gravity & vertical move
+  vy -= 26 * dt;
+  prevY = py;
+  py += vy * dt;
+
+  // Landing on the highest surface under the feet
+  let best = -Infinity, bs = null;
+  if (vy <= 0) {
+    for (const s of surfaces) {
+      if (!inside(s, px, pz)) continue;
+      const near = prevY >= s.top - 0.35 || (grounded && s.top - py > 0 && s.top - py <= 0.6);
+      if (near && py <= s.top + 0.05 && s.top > best) { best = s.top; bs = s; }
+    }
+  }
+  if (bs) {
+    py = best; vy = 0; grounded = true; ground = bs;
+    if (bs.cp) checkpoint = bs.cp;
+  } else {
+    grounded = false; ground = null;
+  }
+
+  // Fell into the void
+  if (py < -25) {
+    respawn();
+    showMsg('Düştün! Son adadan devam ediyorsun.');
+  }
+
+  // Gear pickup
+  for (const c of collectibles) {
+    if (!c.got && Math.hypot(c.x - px, c.y - (py + 0.9), c.z - pz) < 1.5) {
+      c.got = true;
+      c.g.visible = false;
+      count++;
+      cntEl.textContent = count;
+      sparks(c.x, c.y, c.z, 16);
+      if (count < 4) showMsg(`Dişli ${count}/4 bulundu!`);
+      else showMsg('Dört dişli tamam! Saat kulesinin tepesine çık!', 4);
+    }
+  }
+
+  // Win: all gears + standing on the tower roof
+  if (count >= 4 && ground === TOP) win();
+
+  // Birds: patrol, collision
+  if (invuln > 0) invuln -= dt;
+  for (const b of birds) {
+    if (b.stun > 0) {
+      b.stun -= dt;
+      b.g.rotation.z += dt * 8;
+      continue;
+    }
+    b.ang += dt * b.s;
+    const th = b.ang;
+    const x = b.cx + Math.cos(th) * b.R, z = b.cz + Math.sin(th) * b.R;
+    const dx = -Math.sin(th), dz = Math.cos(th);
+    b.g.position.set(x, b.h + Math.sin(th * 3) * 0.2, z);
+    b.g.rotation.set(0, Math.atan2(dx, dz), 0);
+    if (invuln <= 0) {
+      tmpV.set(px, py + 0.9, pz);
+      if (b.g.position.distanceTo(tmpV) < 1.0) {
+        respawn();
+        invuln = 1.5;
+        showMsg('Robot kuş seni yakaladı!');
+        break;
+      }
+    }
+  }
+}
+
+// ---------- Visual animation (always runs) ----------
+function animateScene(dt, t) {
+  // Player body follows logic
+  player.position.set(px, py, pz);
+  player.rotation.y = yaw;
+
+  const speed = Math.hypot(vxS, vzS);
+  const walk = grounded ? Math.min(1, speed / 7.5) : 0;
+  walkT += dt * speed * 1.2;
+  legL.rotation.x = Math.sin(walkT) * 0.8 * walk;
+  legR.rotation.x = -Math.sin(walkT) * 0.8 * walk;
+  armL.rotation.x = -Math.sin(walkT) * 0.5 * walk;
+  body.position.y = 0.11 + Math.abs(Math.sin(walkT)) * 0.05 * walk;
+  cape.rotation.x = 0.1 + speed * 0.02;
+  scarfTail.rotation.x = Math.sin(t * 6) * 0.2 - speed * 0.03;
+
+  // Hammer swing
+  if (attackT > 0) {
+    attackT -= dt;
+    hPiv.rotation.x = -0.6 + 2.0 * (1 - Math.max(0, attackT) / 0.4);
+  } else {
+    hPiv.rotation.x = -0.6;
+  }
+
+  // Collectibles spin & bob
+  for (const c of collectibles) {
+    if (!c.got) {
+      c.g.rotation.z += dt * 1.5;
+      c.g.position.y = c.y + Math.sin(t * 2 + c.x) * 0.15;
+    }
+  }
+
+  // Clock hands: slow normally, fast when the clock is restored
+  if (clockHands) clockHands.rotation.z -= dt * (count >= 4 ? 2.5 : 0.25);
+
+  // Birds' wings flap
+  for (const b of birds) {
+    if (b.stun <= 0) {
+      const flap = Math.sin(t * 18) * 0.6;
+      b.wL.rotation.z = flap;
+      b.wR.rotation.z = -flap;
+    }
+  }
+
+  // Hammer pads expire (blink last second)
+  for (let i = temps.length - 1; i >= 0; i--) {
+    const tp = temps[i];
+    tp.life -= dt;
+    if (tp.life < 1) tp.g.visible = Math.floor(tp.life * 10) % 2 === 0;
+    if (tp.life <= 0) {
+      scene.remove(tp.g);
+      removeSurf(tp.s);
+      temps.splice(i, 1);
+    }
+  }
+
+  // Particles
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    p.v.y -= 14 * dt;
+    p.m.position.addScaledVector(p.v, dt);
+    p.life -= dt;
+    if (p.life <= 0) {
+      scene.remove(p.m);
+      parts.splice(i, 1);
+    }
+  }
+
+  // Sun follows player for shadows
+  sun.position.set(px - 30, py + 60, pz + 25);
+  sun.target.position.set(px, py, pz);
+  sun.target.updateMatrixWorld();
+}
+
+// ---------- Camera ----------
+const camPos = new THREE.Vector3(), camTarget = new THREE.Vector3();
+function updateCamera(dt) {
+  const fx = Math.sin(yaw), fz = Math.cos(yaw);
+  camPos.set(px - fx * 8.5, py + 4.2, pz - fz * 8.5);
+  camera.position.lerp(camPos, Math.min(1, dt * 6));
+  camTarget.set(px + fx * 1.5, py + 1.4, pz + fz * 1.5);
+  camera.lookAt(camTarget);
+}
+
+// ---------- Controls ----------
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space') { jumpReq = true; e.preventDefault(); }
+  if (e.code === 'KeyF' || e.code === 'KeyJ') attackReq = true;
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+
+const stick = $('stick'), base = $('base'), knob = $('knob');
+let stickId = null, sx = 0, sy = 0;
+stick.addEventListener('pointerdown', e => {
+  stickId = e.pointerId;
+  sx = e.clientX; sy = e.clientY;
+  base.style.display = 'block';
+  base.style.left = sx + 'px';
+  base.style.top = sy + 'px';
+  stick.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+stick.addEventListener('pointermove', e => {
+  if (e.pointerId !== stickId) return;
+  let dx = e.clientX - sx, dy = e.clientY - sy;
+  const R = 60;
+  const d = Math.hypot(dx, dy);
+  const k = d > R ? R / d : 1;
+  dx *= k; dy *= k;
+  knob.style.transform = `translate(${dx}px,${dy}px)`;
+  jx = dx / R;
+  jy = -dy / R;
+});
+const endStick = e => {
+  if (e.pointerId !== stickId) return;
+  stickId = null; jx = 0; jy = 0;
+  base.style.display = 'none';
+  knob.style.transform = 'translate(0px,0px)';
+};
+stick.addEventListener('pointerup', endStick);
+stick.addEventListener('pointercancel', endStick);
+
+$('jump').addEventListener('pointerdown', e => { jumpReq = true; e.preventDefault(); });
+$('hit').addEventListener('pointerdown', e => { attackReq = true; e.preventDefault(); });
+
+$('play').onclick = () => {
+  $('start').classList.add('hidden');
+  started = true;
+  showMsg('Dişlileri topla, kuleye tırman!', 3.5);
+};
+$('again').onclick = restart;
+
+// ---------- Start position ----------
+respawn();
+camera.position.set(px - Math.sin(yaw) * 8.5, py + 4.2, pz - Math.cos(yaw) * 8.5);
+
+scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+
+// ---------- Main loop ----------
+let lastT = performance.now();
+let time = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - lastT) / 1000);
+  lastT = now;
+  time += dt;
+
+  if (started && !won) update(dt);
+  animateScene(dt, time);
+  updateCamera(dt);
+
+  if (msgT > 0) {
+    msgT -= dt;
+    if (msgT < 0.4) msgEl.style.opacity = Math.max(0, msgT / 0.4);
+    if (msgT <= 0) msgEl.classList.add('hidden');
+  }
+
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
